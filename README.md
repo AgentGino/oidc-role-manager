@@ -1,6 +1,46 @@
 # OIDC Role Manager
 
+[![CI](https://github.com/YOUR_ORG/oidc-role-manager/workflows/CI/badge.svg)](https://github.com/YOUR_ORG/oidc-role-manager/actions)
+[![Coverage](https://img.shields.io/badge/coverage-94%25-brightgreen)](https://github.com/YOUR_ORG/oidc-role-manager)
+[![Python 3.8+](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/downloads/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![Enterprise Ready](https://img.shields.io/badge/Enterprise-Ready-green.svg)](#enterprise-deployment-checklist)
+
 Enterprise-grade tool for managing AWS IAM OIDC roles for GitHub Actions using Pulumi.
+
+## 📚 Table of Contents
+
+- [OIDC Role Manager](#oidc-role-manager)
+  - [📚 Table of Contents](#-table-of-contents)
+  - [🚀 Features](#-features)
+  - [📋 Prerequisites](#-prerequisites)
+  - [🔧 Installation](#-installation)
+  - [🚀 Quick Start](#-quick-start)
+  - [📁 Project Structure](#-project-structure)
+  - [🎯 Usage](#-usage)
+    - [Basic Commands](#basic-commands)
+    - [CI/CD Usage](#cicd-usage)
+    - [Available Commands](#available-commands)
+    - [Deploy Command Options](#deploy-command-options)
+  - [📝 Configuration](#-configuration)
+    - [Role Directory Structure](#role-directory-structure)
+    - [Example Configuration](#example-configuration)
+  - [🔧 GitHub Actions Integration](#-github-actions-integration)
+  - [🚨 Exit Codes](#-exit-codes)
+  - [🔒 Security Best Practices](#-security-best-practices)
+  - [🔄 Deployment Workflow](#-deployment-workflow)
+    - [Development Workflow](#development-workflow)
+    - [Production Workflow](#production-workflow)
+  - [🧪 Development](#-development)
+    - [Running Tests](#running-tests)
+    - [Code Quality](#code-quality)
+  - [📚 Troubleshooting](#-troubleshooting)
+    - [Common Issues](#common-issues)
+    - [Debug Mode](#debug-mode)
+    - [Stack Management](#stack-management)
+  - [🤝 Contributing](#-contributing)
+  - [📄 License](#-license)
+  - [🔗 Related](#-related)
 
 ## 🚀 Features
 
@@ -16,15 +56,20 @@ Enterprise-grade tool for managing AWS IAM OIDC roles for GitHub Actions using P
 ## 📋 Prerequisites
 
 - Python 3.8+
-- Pulumi CLI installed and configured
-- AWS CLI configured with appropriate permissions
-- GitHub OIDC provider already configured in target AWS accounts
+- **Pulumi CLI**: Installed and configured.
+  - See [Pulumi's installation guide](https://www.pulumi.com/docs/install/) and [AWS setup guide](https://www.pulumi.com/docs/clouds/aws/get-started/). You'll need to be logged into Pulumi (e.g., `pulumi login`).
+- **AWS CLI**: Installed and configured with appropriate permissions.
+  - See the [AWS CLI installation guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-install.html) and [configuration guide](https://docs.aws.amazon.com/cli/latest/userguide/cli-chap-configure.html).
+  - The AWS identity (user or role) running this tool needs permissions to create and manage IAM roles, policies, and OIDC providers. At a minimum, it typically requires permissions similar to `iam:CreateRole`, `iam:DeleteRole`, `iam:GetRole`, `iam:UpdateRole`, `iam:AttachRolePolicy`, `iam:DetachRolePolicy`, `iam:PutRolePolicy`, `iam:GetRolePolicy`, `iam:DeleteRolePolicy`, `iam:ListAttachedRolePolicies`, `iam:ListRolePolicies`, `iam:TagRole`, `iam:UntagRole`, and potentially `iam:GetOpenIDConnectProvider` and `iam:CreateOpenIDConnectProvider` if the tool were to manage OIDC providers (though it currently assumes an existing one). For a more secure setup, tailor these permissions precisely.
+- **GitHub OIDC Provider in AWS**: This tool manages IAM roles that trust an OIDC identity provider (IdP) for GitHub Actions. You must have already configured this OIDC IdP in each target AWS account.
+  - Refer to the official AWS documentation: [Creating OpenID Connect (OIDC) identity providers](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html).
+  - And GitHub's documentation: [About security hardening with OpenID Connect](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect).
 
 ## 🔧 Installation
 
 ```bash
 # Clone the repository
-git clone <repository-url>
+git clone https://github.com/AgentGino/oidc-role-manager.git 
 cd oidc-role-manager
 
 # Create virtual environment
@@ -38,27 +83,137 @@ pip install -r requirements.txt
 pip install -e ".[dev]"
 ```
 
+## 🚀 Quick Start
+
+This guide will walk you through deploying your first OIDC role using this tool.
+
+1.  **Ensure Prerequisites**: Double-check that all items in the [Prerequisites](#-prerequisites) section are met.
+
+2.  **Install the Tool**: Follow the [Installation](#-installation) instructions above.
+
+3.  **Initialize Pulumi Stack (if not already done)**:
+    This tool uses Pulumi stacks to manage resources per AWS account. If you haven't used Pulumi for this AWS account before with this project, you'll need to initialize a stack. The default stack name is `dev`, but you can choose another one.
+
+    The `cli.py` tool will typically create a stack for you if it doesn't exist, based on the account ID (e.g., `dev-123456789012`). However, you might want to create a specific stack or set a default one.
+
+    ```bash
+    # Ensure Pulumi.yaml exists (it should be in the cloned repo)
+    # Initialize a new stack (e.g., for account 123456789012)
+    pulumi stack init dev-123456789012
+
+    # Set AWS region for this stack (replace us-west-2 as needed)
+    pulumi config set aws:region us-west-2
+    ```
+    *Note: The `cli.py` script will also try to create a stack like `dev-{account-id}` if one doesn't exist, and prompt for a region if `aws:region` is not set.* 
+
+4.  **Configure Your First Role**:
+    Role configurations are stored in the `roles/` directory (which is gitignored by default to protect sensitive configurations).
+
+    *   Create the directory structure:
+        ```bash
+        mkdir -p roles/123456789012/MyFirstRole # Replace 123456789012 with your AWS Account ID
+        ```
+
+    *   Create `roles/123456789012/MyFirstRole/details.json` with content like this (adjust `your-org/your-repo` and other details):
+        ```json
+        {
+          "roleName": "GitHubActionMyFirstRole",
+          "description": "My first OIDC role managed by oidc-role-manager",
+          "oidcProviderUrl": "token.actions.githubusercontent.com", // This usually stays the same
+          "githubSubjectClaim": "repo:your-org/your-repo:ref:refs/heads/main", // Adjust to your repo and branch/tag/environment
+          "audience": "sts.amazonaws.com", // This usually stays the same
+          "tags": {
+            "ManagedBy": "OidcRoleManager",
+            "Repository": "your-org/your-repo"
+          }
+        }
+        ```
+
+    *   (Optional) Add managed policies. Create `roles/123456789012/MyFirstRole/managed-policies.json`:
+        ```json
+        [
+          "arn:aws:iam::aws:policy/AmazonS3ReadOnlyAccess"
+        ]
+        ```
+
+    *   (Optional) Add an inline policy. Create `roles/123456789012/MyFirstRole/inline-CustomAccess.json`:
+        ```json
+        {
+          "Version": "2012-10-17",
+          "Statement": [
+            {
+              "Effect": "Allow",
+              "Action": "s3:ListBucket",
+              "Resource": "arn:aws:s3:::your-specific-bucket"
+            }
+          ]
+        }
+        ```
+
+5.  **Validate Configuration**:
+    ```bash
+    python cli.py validate --account-id 123456789012
+    ```
+    If there are errors, the tool will report them. Fix them and re-run.
+
+6.  **Preview Deployment (Dry Run)**:
+    This shows you what resources Pulumi will create or modify without actually making changes.
+    ```bash
+    python cli.py deploy --account-id 123456789012 --dry-run
+    ```
+    Review the output carefully.
+
+7.  **Deploy Your Role**:
+    ```bash
+    python cli.py deploy --account-id 123456789012
+    ```
+    You will be prompted by Pulumi to confirm the changes unless you use `--auto-approve`.
+
+8.  **Check Status**:
+    After deployment, you can check the status and outputs:
+    ```bash
+    python cli.py status --account-id 123456789012
+    ```
+
+Congratulations! You've deployed your first OIDC role. You can now use this role in your GitHub Actions workflows by specifying its ARN in the `role-to-assume` field of the `aws-actions/configure-aws-credentials` action.
+
+Remember to replace `yourorg`, `your-repo`, and `123456789012` with your actual GitHub organization/username, repository name, and AWS account ID throughout these examples.
+
 ## 📁 Project Structure
 
 ```
 oidc-role-manager/
-├── cli.py                   # Main CLI application
-├── oidc_role_manager/       # Core package
+├── cli.py                      # Main CLI application entry point
+├── oidc_role_manager/          # Core package
 │   ├── __init__.py
-│   ├── config_loader.py     # Configuration loading and validation
-│   ├── iam_resources.py     # AWS IAM resource management
-│   ├── pulumi_manager.py    # Pulumi automation API integration
-│   └── constants.py         # Global constants
-├── tests/                   # Test suite
+│   ├── config_loader.py        # Configuration loading and validation
+│   ├── iam_resources.py        # AWS IAM resource management
+│   ├── pulumi_manager.py       # Pulumi automation API integration
+│   └── constants.py            # Global constants and definitions
+├── tests/                      # Comprehensive test suite
 │   ├── __init__.py
-│   └── test_config_loader.py
-├── roles/                   # Role configurations (gitignored)
-│   └── examples/           # Example configurations
-├── requirements.txt        # Python dependencies
-├── requirements-dev.txt    # Development dependencies
-├── pyproject.toml         # Project configuration
-├── setup.py               # Setup script
-└── Pulumi.yaml            # Pulumi project configuration
+│   ├── test_cli.py             # CLI functionality tests
+│   ├── test_config_loader.py   # Configuration loading tests
+│   ├── test_iam_resources.py   # IAM resource tests
+│   ├── test_pulumi_manager.py  # Pulumi integration tests
+│   └── test_constants.py       # Constants and utilities tests
+├── roles/                      # Role configurations (gitignored for security)
+│   ├── .gitkeep               # Keeps directory in version control
+│   └── examples/              # Example configurations for reference
+│       └── 123456789012/      # Example account structure
+├── .github/                   # GitHub Actions workflows and templates
+├── requirements.txt           # Production dependencies
+├── requirements-dev.txt       # Development dependencies
+├── pyproject.toml            # Project configuration and build settings
+├── setup.py                  # Package setup configuration
+├── Pulumi.yaml               # Pulumi project configuration
+├── Pulumi.dev*.yaml          # Pulumi stack configurations
+├── .gitignore               # Git ignore patterns
+├── .pre-commit-config.yaml  # Pre-commit hooks configuration
+├── LICENSE                  # MIT license
+├── README.md               # This file
+├── ENTERPRISE_CHECKLIST.md # Enterprise deployment checklist
+└── check_coverage.py       # Coverage validation script
 ```
 
 ## 🎯 Usage
@@ -356,11 +511,11 @@ python cli.py destroy --stack-name production --account-id 123456789012
 
 ## 📄 License
 
-[Add your license here]
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## 🔗 Related
 
 - [Pulumi AWS Provider](https://www.pulumi.com/registry/packages/aws/)
 - [Pulumi Automation API](https://www.pulumi.com/docs/guides/automation-api/)
 - [GitHub OIDC Documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
-- [AWS IAM OIDC Provider](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html) 
+- [AWS IAM OIDC Provider](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
