@@ -1,0 +1,4 @@
+# This file ensures the roles directory is tracked by git
+# Actual role configurations should be placed in subdirectories
+# and are excluded by .gitignore for security
+# Use the examples directory for reference configurations 

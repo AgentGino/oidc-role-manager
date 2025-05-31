@@ -1,0 +1,22 @@
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "s3:PutObject",
+        "s3:PutObjectAcl",
+        "s3:DeleteObject"
+      ],
+      "Resource": "arn:aws:s3:::my-staging-deployment-bucket/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": [
+        "cloudformation:DescribeStacks",
+        "cloudformation:DescribeStackResources"
+      ],
+      "Resource": "arn:aws:cloudformation:*:123456789012:stack/staging-*/*"
+    }
+  ]
+} 

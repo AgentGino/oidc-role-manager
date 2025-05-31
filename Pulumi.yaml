@@ -1,0 +1,3 @@
+name: oidc-role-manager
+runtime: python
+description: A Python Pulumi program to manage AWS IAM OIDC roles 

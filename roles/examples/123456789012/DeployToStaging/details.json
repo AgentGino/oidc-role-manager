@@ -1,0 +1,14 @@
+{
+  "roleName": "GitHubActionDeployToStaging",
+  "description": "Role for GitHub Actions to deploy to staging environment",
+  "oidcProviderUrl": "token.actions.githubusercontent.com",
+  "githubSubjectClaim": "repo:your-org/your-repo:environment:staging",
+  "audience": "sts.amazonaws.com",
+  "tags": {
+    "Application": "WebApp",
+    "Environment": "Staging",
+    "AutomationTool": "GitHubActions",
+    "Team": "DevOps",
+    "CostCenter": "Engineering"
+  }
+} 
