@@ -27,22 +27,36 @@ class PulumiStackManager:
                  stack_name: str = "dev", 
                  aws_region: Optional[str] = None,
                  aws_profile: Optional[str] = None,
-                 backend_url: Optional[str] = None):
+                 backend_url: Optional[str] = None,
+                 assume_role_arn: Optional[str] = None,
+                 external_id: Optional[str] = None):
         self.project_name = project_name
         self.stack_name = stack_name
         self.aws_region = aws_region
         self.aws_profile = aws_profile
+        self.assume_role_arn = assume_role_arn
+        self.external_id = external_id
         self.work_dir = Path.cwd()
         
-        # Use local file system backend by default for development
-        if backend_url is None:
-            self.backend_url = f"file://{self.work_dir / '.pulumi-state'}"
-        else:
+        # Backend URL configuration with multiple options:
+        # 1. Explicit backend_url parameter
+        # 2. PULUMI_BACKEND_URL environment variable  
+        # 3. Default to local file system for development
+        if backend_url is not None:
             self.backend_url = backend_url
-        
-        # Ensure state directory exists
-        state_dir = self.work_dir / '.pulumi-state'
-        state_dir.mkdir(exist_ok=True)
+        elif os.getenv("PULUMI_BACKEND_URL"):
+            self.backend_url = os.getenv("PULUMI_BACKEND_URL")
+        else:
+            # Use local file system backend by default for development
+            # For production, consider using:
+            # - Pulumi Cloud: set PULUMI_BACKEND_URL="" and run `pulumi login`
+            # - S3: set PULUMI_BACKEND_URL="s3://bucket/path"
+            # - Azure: set PULUMI_BACKEND_URL="azblob://container/path"
+            self.backend_url = f"file://{self.work_dir / '.pulumi-state'}"
+            
+            # Only create local state directory if using local backend
+            state_dir = self.work_dir / '.pulumi-state'
+            state_dir.mkdir(exist_ok=True)
         
     def _create_pulumi_program(self, role_configs: List[RoleConfig]):
         """Create the Pulumi program function that defines all resources."""
@@ -55,6 +69,18 @@ class PulumiStackManager:
                 provider_opts = {"region": self.aws_region}
                 if self.aws_profile:
                     provider_opts["profile"] = self.aws_profile
+                
+                # Cross-account role assumption configuration
+                if self.assume_role_arn:
+                    assume_role_config = {
+                        "role_arn": self.assume_role_arn,
+                        "session_name": f"oidc-role-manager-{self.stack_name}"
+                    }
+                    if self.external_id:
+                        assume_role_config["external_id"] = self.external_id
+                    
+                    provider_opts["assume_role"] = assume_role_config
+                    logger.info(f"Configured cross-account role assumption: {self.assume_role_arn}")
                 
                 aws_provider = aws.Provider(
                     f"aws-provider",

@@ -14,6 +14,20 @@ Enterprise-grade tool for managing AWS IAM OIDC roles for GitHub Actions using P
   - [📚 Table of Contents](#-table-of-contents)
   - [🚀 Features](#-features)
   - [📋 Prerequisites](#-prerequisites)
+  - [🗄️ State Management](#️-state-management)
+    - [Local State (Development)](#local-state-development)
+    - [Remote State (Production Recommended)](#remote-state-production-recommended)
+      - [Option 1: Pulumi Cloud (Recommended)](#option-1-pulumi-cloud-recommended)
+      - [Option 2: AWS S3 Backend](#option-2-aws-s3-backend)
+      - [Option 3: Azure Blob Storage](#option-3-azure-blob-storage)
+    - [State Management Best Practices](#state-management-best-practices)
+  - [🔐 Cross-Account Authentication](#-cross-account-authentication)
+    - [1. **AWS Profile-Based Authentication (Simple)**](#1-aws-profile-based-authentication-simple)
+    - [2. **Cross-Account Role Assumption (Recommended)**](#2-cross-account-role-assumption-recommended)
+    - [3. **GitHub Actions OIDC Authentication**](#3-github-actions-oidc-authentication)
+    - [4. **AWS SSO/Identity Center Integration**](#4-aws-ssoidentity-center-integration)
+    - [Cross-Account Setup Requirements](#cross-account-setup-requirements)
+    - [Enterprise Deployment Script](#enterprise-deployment-script)
   - [🔧 Installation](#-installation)
   - [🚀 Quick Start](#-quick-start)
   - [📁 Project Structure](#-project-structure)
@@ -31,6 +45,7 @@ Enterprise-grade tool for managing AWS IAM OIDC roles for GitHub Actions using P
   - [🔄 Deployment Workflow](#-deployment-workflow)
     - [Development Workflow](#development-workflow)
     - [Production Workflow](#production-workflow)
+    - [Cross-Account Workflow](#cross-account-workflow)
   - [🧪 Development](#-development)
     - [Running Tests](#running-tests)
     - [Code Quality](#code-quality)
@@ -64,6 +79,177 @@ Enterprise-grade tool for managing AWS IAM OIDC roles for GitHub Actions using P
 - **GitHub OIDC Provider in AWS**: This tool manages IAM roles that trust an OIDC identity provider (IdP) for GitHub Actions. You must have already configured this OIDC IdP in each target AWS account.
   - Refer to the official AWS documentation: [Creating OpenID Connect (OIDC) identity providers](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html).
   - And GitHub's documentation: [About security hardening with OpenID Connect](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect).
+
+## 🗄️ State Management
+
+This tool uses Pulumi for infrastructure management, which requires state storage to track your infrastructure. You have several options for state management:
+
+### Local State (Development)
+**Default behavior** - State stored locally in `.pulumi-state/` directory:
+```bash
+# Uses local file system (default)
+python cli.py deploy --account-id 123456789012
+```
+
+### Remote State (Production Recommended)
+
+#### Option 1: Pulumi Cloud (Recommended)
+```bash
+# Login to Pulumi Cloud
+pulumi login
+
+# Deploy using Pulumi Cloud backend
+PULUMI_BACKEND_URL="" python cli.py deploy --account-id 123456789012
+```
+
+#### Option 2: AWS S3 Backend
+```bash
+# Using environment variable
+export PULUMI_BACKEND_URL="s3://your-pulumi-state-bucket/oidc-roles"
+python cli.py deploy --account-id 123456789012
+
+# Or using CLI option
+python cli.py deploy --account-id 123456789012 --backend-url "s3://your-pulumi-state-bucket/oidc-roles"
+```
+
+#### Option 3: Azure Blob Storage
+```bash
+export PULUMI_BACKEND_URL="azblob://your-container/oidc-roles"
+python cli.py deploy --account-id 123456789012
+```
+
+### State Management Best Practices
+
+1. **Use Remote State for Production**: Local state is only suitable for development
+2. **Secure Your State**: State files contain sensitive information - use proper access controls
+3. **Enable State Locking**: Remote backends provide concurrent access protection
+4. **Backup Your State**: Pulumi automatically creates backups, but consider additional backup strategies
+5. **Team Collaboration**: Remote state enables multiple team members to manage the same infrastructure
+
+## 🔐 Cross-Account Authentication
+
+For enterprise environments, you'll often need to deploy OIDC roles across multiple AWS accounts. This tool supports several authentication patterns:
+
+### 1. **AWS Profile-Based Authentication (Simple)**
+Configure different AWS profiles for each target account:
+
+```bash
+# Deploy to Account A using profile
+python cli.py deploy --account-id 123456789012 --aws-profile account-a-admin
+
+# Deploy to Account B using different profile  
+python cli.py deploy --account-id 987654321098 --aws-profile account-b-admin
+```
+
+### 2. **Cross-Account Role Assumption (Recommended)**
+Use a central administrative role that can assume roles in target accounts:
+
+```bash
+# Assume deployment role in target account
+python cli.py deploy \
+  --account-id 123456789012 \
+  --assume-role-arn "arn:aws:iam::123456789012:role/CrossAccountDeploymentRole" \
+  --external-id "unique-external-id"
+
+# Or using environment variables
+export AWS_ASSUME_ROLE_ARN="arn:aws:iam::123456789012:role/CrossAccountDeploymentRole"
+export AWS_EXTERNAL_ID="unique-external-id"
+python cli.py deploy --account-id 123456789012
+```
+
+### 3. **GitHub Actions OIDC Authentication**
+For CI/CD pipelines, use GitHub Actions OIDC with cross-account role assumption:
+
+```yaml
+name: Deploy OIDC Roles
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Configure AWS credentials for central account
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::CENTRAL-ACCOUNT:role/GitHubOIDCDeploymentRole
+          aws-region: us-west-2
+      
+      - name: Deploy to target account via role assumption
+        run: |
+          python cli.py deploy \
+            --account-id 123456789012 \
+            --assume-role-arn "arn:aws:iam::123456789012:role/CrossAccountDeploymentRole" \
+            --auto-approve
+```
+
+### 4. **AWS SSO/Identity Center Integration**
+For organizations using AWS SSO:
+
+```bash
+# Login with SSO
+aws sso login --profile sso-account-a
+
+# Deploy using SSO profile
+python cli.py deploy --account-id 123456789012 --aws-profile sso-account-a
+```
+
+### Cross-Account Setup Requirements
+
+To use cross-account role assumption, you need:
+
+1. **Central Administrative Role**: A role in your central account that can assume deployment roles
+2. **Target Account Deployment Roles**: Roles in each target account with necessary IAM permissions
+3. **Trust Relationships**: Configure trust between central and target account roles
+
+**Example Target Account Role Trust Policy:**
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Principal": {
+        "AWS": "arn:aws:iam::CENTRAL-ACCOUNT:role/GitHubOIDCDeploymentRole"
+      },
+      "Action": "sts:AssumeRole",
+      "Condition": {
+        "StringEquals": {
+          "sts:ExternalId": "unique-external-id"
+        }
+      }
+    }
+  ]
+}
+```
+
+### Enterprise Deployment Script
+
+For complex multi-account deployments, use the provided deployment script:
+
+```bash
+# Make script executable
+chmod +x scripts/cross-account-deploy.sh
+
+# Deploy using AWS profiles
+./scripts/cross-account-deploy.sh profile
+
+# Preview deployment using role assumption  
+DRY_RUN=true ./scripts/cross-account-deploy.sh assume-role
+
+# Deploy using environment variables with external ID
+AWS_EXTERNAL_ID="my-unique-id" ./scripts/cross-account-deploy.sh env-vars
+```
+
+The script supports:
+- **Batch deployment** across multiple accounts
+- **Multiple authentication methods** 
+- **Error handling and retry logic**
+- **Deployment progress tracking**
+- **Dry-run mode** for safe testing
 
 ## 🔧 Installation
 
@@ -197,6 +383,10 @@ oidc-role-manager/
 │   ├── test_iam_resources.py   # IAM resource tests
 │   ├── test_pulumi_manager.py  # Pulumi integration tests
 │   └── test_constants.py       # Constants and utilities tests
+├── scripts/                    # Deployment and utility scripts
+│   └── cross-account-deploy.sh # Multi-account deployment script
+├── docs/                       # Additional documentation
+│   └── CROSS_ACCOUNT_AUTH.md   # Cross-account authentication guide
 ├── roles/                      # Role configurations (gitignored for security)
 │   ├── .gitkeep               # Keeps directory in version control
 │   └── examples/              # Example configurations for reference
@@ -253,6 +443,9 @@ export OIDC_JSON_OUTPUT="true"
 export OIDC_LOG_LEVEL="INFO"
 export OIDC_AUTO_APPROVE="true"
 
+# For remote state (recommended for production)
+export PULUMI_BACKEND_URL="s3://your-pulumi-state-bucket/oidc-roles"
+
 # Preview with JSON output
 python cli.py deploy --account-id $AWS_ACCOUNT_ID --dry-run
 
@@ -278,7 +471,10 @@ python cli.py deploy --account-id $AWS_ACCOUNT_ID --auto-approve
 | `--roles-dir` | `OIDC_ROLES_DIR` | Directory containing role definitions |
 | `--aws-region` | `AWS_REGION` | AWS region for resources |
 | `--aws-profile` | `AWS_PROFILE` | AWS profile to use |
+| `--assume-role-arn` | `AWS_ASSUME_ROLE_ARN` | ARN of role to assume for cross-account access |
+| `--external-id` | `AWS_EXTERNAL_ID` | External ID for role assumption |
 | `--stack-name` | `PULUMI_STACK_NAME` | Pulumi stack name (default: dev) |
+| `--backend-url` | `PULUMI_BACKEND_URL` | Pulumi backend URL for state storage |
 | `--log-level` | `OIDC_LOG_LEVEL` | Logging level |
 | `--json-output` | `OIDC_JSON_OUTPUT` | Enable JSON output for CI/CD |
 | `--dry-run` | - | Preview changes without applying |
@@ -368,11 +564,11 @@ jobs:
         run: |
           pip install -r requirements.txt
           
-      - name: Configure AWS credentials
+      - name: Configure AWS credentials for central account
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/GitHubActionDeployToStaging
-          aws-region: ${{ vars.AWS_REGION }}
+          role-to-assume: arn:aws:iam::CENTRAL-ACCOUNT:role/GitHubOIDCDeploymentRole
+          aws-region: us-west-2
       
       - name: Validate configurations
         run: |
@@ -382,7 +578,7 @@ jobs:
         run: |
           python cli.py deploy \
             --account-id ${{ vars.AWS_ACCOUNT_ID }} \
-            --aws-region ${{ vars.AWS_REGION }} \
+            --assume-role-arn "arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/CrossAccountDeploymentRole" \
             --dry-run \
             --json-output
       
@@ -390,7 +586,7 @@ jobs:
         run: |
           python cli.py deploy \
             --account-id ${{ vars.AWS_ACCOUNT_ID }} \
-            --aws-region ${{ vars.AWS_REGION }} \
+            --assume-role-arn "arn:aws:iam::${{ vars.AWS_ACCOUNT_ID }}:role/CrossAccountDeploymentRole" \
             --auto-approve \
             --json-output
 ```
@@ -413,6 +609,8 @@ jobs:
 4. **Preview before deploying** - Use `--dry-run` to see changes first
 5. **Monitor role usage** - Set up CloudTrail logging
 6. **Rotate credentials** - Regularly review and update access patterns
+7. **Use external IDs** - Add external IDs for cross-account role assumption security
+8. **Environment-specific claims** - Use GitHub environment constraints in subject claims
 
 ## 🔄 Deployment Workflow
 
@@ -436,12 +634,19 @@ python cli.py status --account-id 123456789012 --json-output
 
 ### Production Workflow
 ```bash
-# Automated CI/CD deployment
+# Automated CI/CD deployment with cross-account roles
 python cli.py deploy \
   --account-id $AWS_ACCOUNT_ID \
-  --aws-region $AWS_REGION \
+  --assume-role-arn $DEPLOYMENT_ROLE_ARN \
+  --external-id $EXTERNAL_ID \
   --auto-approve \
   --json-output
+```
+
+### Cross-Account Workflow
+```bash
+# Using the deployment script for multiple accounts
+./scripts/cross-account-deploy.sh assume-role
 ```
 
 ## 🧪 Development
@@ -456,7 +661,7 @@ pip install -r requirements-dev.txt
 pytest
 
 # Run with coverage
-pytest --cov=oidc_role_manager
+pytest --cov=oidc_role_manager --cov-fail-under=85
 ```
 
 ### Code Quality
@@ -470,6 +675,12 @@ flake8 .
 
 # Type checking
 mypy .
+
+# Sort imports
+isort .
+
+# Security check
+bandit -r oidc_role_manager
 ```
 
 ## 📚 Troubleshooting
@@ -481,33 +692,46 @@ mypy .
 3. **Permission Denied**: Ensure AWS credentials have IAM permissions
 4. **Configuration Errors**: Use `validate` command to check configurations
 5. **Stack Already Exists**: Use different `--stack-name` or destroy existing stack
+6. **Cross-Account Access Denied**: Verify trust relationships and external IDs
+7. **State Backend Issues**: Check state backend permissions and configuration
 
 ### Debug Mode
 
 ```bash
 # Enable debug logging
 python cli.py --log-level DEBUG deploy --account-id 123456789012 --dry-run
+
+# Check cross-account authentication
+python cli.py --log-level DEBUG deploy \
+  --account-id 123456789012 \
+  --assume-role-arn "arn:aws:iam::123456789012:role/TestRole" \
+  --dry-run
 ```
 
 ### Stack Management
 
 ```bash
 # Check stack status
-python cli.py status --stack-name production --account-id 123456789012
+python cli.py status --account-id 123456789012
 
 # Use different stack
 python cli.py deploy --account-id 123456789012 --stack-name production
 
 # Destroy stack
-python cli.py destroy --stack-name production --account-id 123456789012
+python cli.py destroy --account-id 123456789012 --stack-name production
+
+# List all stacks
+python cli.py list-stacks
 ```
 
 ## 🤝 Contributing
 
 1. Follow the KISS principle - keep it simple and modular
-2. Add tests for new functionality
-3. Update documentation
-4. Follow existing code style
+2. Add tests for new functionality (maintain 85%+ coverage)
+3. Update documentation for any changes
+4. Follow existing code style (black, isort, flake8)
+5. Add type hints for all functions
+6. Include security considerations in design
 
 ## 📄 License
 
@@ -519,3 +743,4 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - [Pulumi Automation API](https://www.pulumi.com/docs/guides/automation-api/)
 - [GitHub OIDC Documentation](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/about-security-hardening-with-openid-connect)
 - [AWS IAM OIDC Provider](https://docs.aws.amazon.com/IAM/latest/UserGuide/id_roles_providers_create_oidc.html)
+- [AWS Cross-Account Roles](https://docs.aws.amazon.com/IAM/latest/UserGuide/tutorial_cross-account-with-roles.html)

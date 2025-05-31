@@ -133,10 +133,25 @@ def cli(ctx, log_level: str, json_output: bool):
     help="AWS profile to use (env: AWS_PROFILE)"
 )
 @click.option(
+    "--assume-role-arn",
+    envvar="AWS_ASSUME_ROLE_ARN",
+    help="ARN of role to assume for cross-account access (env: AWS_ASSUME_ROLE_ARN)"
+)
+@click.option(
+    "--external-id", 
+    envvar="AWS_EXTERNAL_ID",
+    help="External ID for role assumption (env: AWS_EXTERNAL_ID)"
+)
+@click.option(
     "--stack-name",
     default="dev",
     envvar="PULUMI_STACK_NAME",
     help="Base stack name (will be combined with account ID) (env: PULUMI_STACK_NAME)"
+)
+@click.option(
+    "--backend-url",
+    envvar="PULUMI_BACKEND_URL", 
+    help="Pulumi backend URL (env: PULUMI_BACKEND_URL). Examples: s3://bucket/path, azblob://container/path, or leave empty for Pulumi Cloud"
 )
 @click.option(
     "--dry-run",
@@ -152,7 +167,8 @@ def cli(ctx, log_level: str, json_output: bool):
 @click.pass_context
 def deploy(ctx, account_id: str, role_name: Optional[str], roles_dir: Path, 
           aws_region: Optional[str], aws_profile: Optional[str], 
-          stack_name: str, dry_run: bool, auto_approve: bool):
+          assume_role_arn: Optional[str], external_id: Optional[str],
+          stack_name: str, backend_url: Optional[str], dry_run: bool, auto_approve: bool):
     """Deploy OIDC roles to a specified AWS account."""
     logger = ctx.obj["logger"]
     json_output = ctx.obj["json_output"]
@@ -168,6 +184,8 @@ def deploy(ctx, account_id: str, role_name: Optional[str], roles_dir: Path,
             "roles_dir": str(roles_dir),
             "aws_region": aws_region,
             "aws_profile": aws_profile,
+            "assume_role_arn": assume_role_arn,
+            "external_id": "***" if external_id else None,  # Mask sensitive external ID
             "stack_name": account_stack_name,
             "dry_run": dry_run
         }
@@ -226,7 +244,9 @@ def deploy(ctx, account_id: str, role_name: Optional[str], roles_dir: Path,
             stack_name=account_stack_name,
             aws_region=aws_region,
             aws_profile=aws_profile,
-            json_output=json_output # Pass json_output to PulumiStackManager
+            backend_url=backend_url,
+            assume_role_arn=assume_role_arn,
+            external_id=external_id
         )
 
         # Process configurations
@@ -356,13 +376,18 @@ def deploy(ctx, account_id: str, role_name: Optional[str], roles_dir: Path,
     help="Base stack name (will be combined with account ID) (env: PULUMI_STACK_NAME)"
 )
 @click.option(
+    "--backend-url",
+    envvar="PULUMI_BACKEND_URL",
+    help="Pulumi backend URL (env: PULUMI_BACKEND_URL)"
+)
+@click.option(
     "--auto-approve",
     is_flag=True,
     envvar="OIDC_AUTO_APPROVE",
     help="Automatically approve destruction without confirmation (env: OIDC_AUTO_APPROVE)"
 )
 @click.pass_context
-def destroy(ctx, account_id: str, stack_name: str, auto_approve: bool):
+def destroy(ctx, account_id: str, stack_name: str, backend_url: Optional[str], auto_approve: bool):
     """Destroy all deployed OIDC roles for a specific account."""
     logger = ctx.obj["logger"]
     json_output = ctx.obj["json_output"]
@@ -373,7 +398,8 @@ def destroy(ctx, account_id: str, stack_name: str, auto_approve: bool):
     try:
         pulumi_manager = PulumiStackManager(
             project_name="oidc-role-manager",
-            stack_name=account_stack_name
+            stack_name=account_stack_name,
+            backend_url=backend_url
         )
         
         # Check if stack exists
@@ -492,8 +518,13 @@ def validate(ctx, roles_dir: Path):
     envvar="PULUMI_STACK_NAME",
     help="Base stack name (will be combined with account ID) (env: PULUMI_STACK_NAME)"
 )
+@click.option(
+    "--backend-url",
+    envvar="PULUMI_BACKEND_URL",
+    help="Pulumi backend URL (env: PULUMI_BACKEND_URL)"
+)
 @click.pass_context
-def status(ctx, account_id: str, stack_name: str):
+def status(ctx, account_id: str, stack_name: str, backend_url: Optional[str]):
     """Show deployment status and outputs for a specific account."""
     logger = ctx.obj["logger"]
     json_output = ctx.obj["json_output"]
@@ -504,7 +535,8 @@ def status(ctx, account_id: str, stack_name: str):
     try:
         pulumi_manager = PulumiStackManager(
             project_name="oidc-role-manager",
-            stack_name=account_stack_name
+            stack_name=account_stack_name,
+            backend_url=backend_url
         )
         
         stack_info = pulumi_manager.get_stack_info()
